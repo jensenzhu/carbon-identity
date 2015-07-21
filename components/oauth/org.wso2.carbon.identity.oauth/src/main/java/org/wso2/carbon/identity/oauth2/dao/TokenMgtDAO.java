@@ -193,9 +193,13 @@ public class TokenMgtDAO {
             accessTokenStoreTable = accessTokenStoreTable + "_" + userStoreDomain;
         }
 
-        String sql = SQLQueries.INSERT_OAUTH2_ACCESS_TOKEN.replaceAll("\\$accessTokenStoreTable",
-                accessTokenStoreTable);
-        String sqlAddScopes = SQLQueries.INSERT_OAUTH2_TOKEN_SCOPE;
+        String sql = "INSERT INTO " +
+                     accessTokenStoreTable +
+                " (ACCESS_TOKEN, REFRESH_TOKEN, CONSUMER_KEY, AUTHZ_USER, TIME_CREATED, REFRESH_TOKEN_TIME_CREATED, " +
+                "VALIDITY_PERIOD, REFRESH_TOKEN_VALIDITY_PERIOD, TOKEN_SCOPE_HASH, TOKEN_STATE, USER_TYPE, TOKEN_ID) " +
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)";
+        String sqlAddScopes = "INSERT INTO IDN_OAUTH2_SCOPE_ASSOCIATION (TOKEN_ID, TOKEN_SCOPE) " +
+                "VALUES (?,?)";
         try {
             prepStmt = connection.prepareStatement(sql);
             prepStmt.setString(1, persistenceProcessor.getProcessedAccessTokenIdentifier(accessToken));
@@ -314,8 +318,7 @@ public class TokenMgtDAO {
 
             String sql;
             if (connection.getMetaData().getDriverName().contains("MySQL")
-                || connection.getMetaData().getDriverName().contains("H2")
-                || connection.getMetaData().getDatabaseProductName().contains("DB2")) {
+                || connection.getMetaData().getDriverName().contains("H2")) {
                 sql = SQLQueries.RETRIEVE_LATEST_ACCESS_TOKEN_BY_CLIENT_ID_USER_SCOPE_MYSQL;
             } else if (connection.getMetaData().getDriverName().contains("MS SQL")) {
                 sql = SQLQueries.RETRIEVE_LATEST_ACCESS_TOKEN_BY_CLIENT_ID_USER_SCOPE_MSSQL;
@@ -323,10 +326,6 @@ public class TokenMgtDAO {
                 sql = SQLQueries.RETRIEVE_LATEST_ACCESS_TOKEN_BY_CLIENT_ID_USER_SCOPE_MSSQL;
             } else if (connection.getMetaData().getDriverName().contains("PostgreSQL")) {
                 sql = SQLQueries.RETRIEVE_LATEST_ACCESS_TOKEN_BY_CLIENT_ID_USER_SCOPE_POSTGRESQL;
-            } else if (connection.getMetaData().getDriverName().contains("Informix")){
-                // Driver name = "IBM Informix JDBC Driver for IBM Informix Dynamic Server"
-                sql = SQLQueries.RETRIEVE_LATEST_ACCESS_TOKEN_BY_CLIENT_ID_USER_SCOPE_INFORMIX;
-
             } else {
                 sql = SQLQueries.RETRIEVE_LATEST_ACCESS_TOKEN_BY_CLIENT_ID_USER_SCOPE_ORACLE;
             }
@@ -473,7 +472,7 @@ public class TokenMgtDAO {
                     dataDO.setTokenId(tokenId);
                     accessTokenDOMap.put(accessToken, dataDO);
                 } else {
-                    String scope = resultSet.getString(3).trim();
+                    String scope = resultSet.getString(8).trim();
                     AccessTokenDO accessTokenDO = accessTokenDOMap.get(accessToken);
                     accessTokenDO.setScope((String[]) ArrayUtils.add(accessTokenDO.getScope(), scope));
                 }
@@ -610,7 +609,6 @@ public class TokenMgtDAO {
         String oracleQuery;
         String msSqlQuery;
         String postgreSqlQuery;
-        String informixQuery;
 
         try {
             connection = JDBCPersistenceManager.getInstance().getDBConnection();
@@ -622,20 +620,40 @@ public class TokenMgtDAO {
             if (userStoreDomain != null) {
                 accessTokenStoreTable = accessTokenStoreTable + "_" + userStoreDomain;
             }
-            mySqlQuery = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_MYSQL.replaceAll("\\$accessTokenStoreTable",
-                    accessTokenStoreTable);
-            oracleQuery = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_ORACLE.replaceAll("\\$accessTokenStoreTable",
-                    accessTokenStoreTable);
-            msSqlQuery = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_MSSQL.replaceAll("\\$accessTokenStoreTable",
-                    accessTokenStoreTable);
-            informixQuery = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_INFORMIX.replaceAll
-                    ("\\$accessTokenStoreTable", accessTokenStoreTable);
-            postgreSqlQuery = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_POSTGRESQL.replaceAll
-                    ("\\$accessTokenStoreTable", accessTokenStoreTable);
+            mySqlQuery = "SELECT ACCESS_TOKEN, AUTHZ_USER, TOKEN_SCOPE, TOKEN_STATE, REFRESH_TOKEN_TIME_CREATED, " +
+                    "REFRESH_TOKEN_VALIDITY_PERIOD, IDN_OAUTH2_ACCESS_TOKEN_SELECTED.TOKEN_ID FROM ( SELECT " +
+                    "ACCESS_TOKEN, AUTHZ_USER, TOKEN_STATE, REFRESH_TOKEN_TIME_CREATED, " +
+                    "REFRESH_TOKEN_VALIDITY_PERIOD, TOKEN_ID FROM " + accessTokenStoreTable + " WHERE CONSUMER_KEY = " +
+                    "? AND REFRESH_TOKEN = ? ORDER BY TIME_CREATED DESC LIMIT 1) AS IDN_OAUTH2_ACCESS_TOKEN_SELECTED " +
+                         "JOIN IDN_OAUTH2_SCOPE_ASSOCIATION WHERE IDN_OAUTH2_ACCESS_TOKEN_SELECTED.TOKEN_ID =" +
+                         " IDN_OAUTH2_SCOPE_ASSOCIATION.TOKEN_ID";
+
+            oracleQuery = "SELECT ACCESS_TOKEN, AUTHZ_USER, TOKEN_SCOPE, TOKEN_STATE, REFRESH_TOKEN_TIME_CREATED, " +
+                    "REFRESH_TOKEN_VALIDITY_PERIOD, IDN_OAUTH2_ACCESS_TOKEN_SELECTED.TOKEN_ID FROM ( SELECT * FROM " +
+                    "(SELECT ACCESS_TOKEN, AUTHZ_USER, TOKEN_STATE, REFRESH_TOKEN_TIME_CREATED, " +
+                    "REFRESH_TOKEN_VALIDITY_PERIOD, TOKEN_ID FROM " + accessTokenStoreTable + " WHERE CONSUMER_KEY = " +
+                    "? AND REFRESH_TOKEN = ? ORDER BY TIME_CREATED DESC) WHERE ROWNUM < 2 )  AS " +
+                          "IDN_OAUTH2_ACCESS_TOKEN_SELECTED JOIN IDN_OAUTH2_SCOPE_ASSOCIATION WHERE " +
+                          "IDN_OAUTH2_ACCESS_TOKEN_SELECTED.TOKEN_ID = IDN_OAUTH2_SCOPE_ASSOCIATION.TOKEN_ID";
+
+            msSqlQuery = "SELECT ACCESS_TOKEN, AUTHZ_USER, TOKEN_SCOPE, TOKEN_STATE, REFRESH_TOKEN_TIME_CREATED, " +
+                    "REFRESH_TOKEN_VALIDITY_PERIOD, IDN_OAUTH2_ACCESS_TOKEN_SELECTED.TOKEN_ID FROM (SELECT TOP 1 ACCESS_TOKEN, " +
+                    "AUTHZ_USER, TOKEN_SCOPE, TOKEN_STATE, REFRESH_TOKEN_TIME_CREATED, TOKEN_ID FROM, " +
+                    "REFRESH_TOKEN_VALIDITY_PERIOD, TOKEN_ID " + accessTokenStoreTable + " WHERE CONSUMER_KEY = ? AND" +
+                         " REFRESH_TOKEN = ? ORDER BY TIME_CREATED DESC) AS IDN_OAUTH2_ACCESS_TOKEN_SELECTED JOIN " +
+                         "IDN_OAUTH2_SCOPE_ASSOCIATION WHERE IDN_OAUTH2_ACCESS_TOKEN_SELECTED.TOKEN_ID = " +
+                         "IDN_OAUTH2_SCOPE_ASSOCIATION.TOKEN_ID";
+
+            postgreSqlQuery = "SELECT ACCESS_TOKEN, AUTHZ_USER, TOKEN_SCOPE, TOKEN_STATE, REFRESH_TOKEN_TIME_CREATED," +
+                    " REFRESH_TOKEN_VALIDITY_PERIOD, IDN_OAUTH2_ACCESS_TOKEN_SELECTED.TOKEN_ID FROM (SELECT " +
+                    "ACCESS_TOKEN, AUTHZ_USER, TOKEN_STATE, REFRESH_TOKEN_TIME_CREATED, " +
+                    "REFRESH_TOKEN_VALIDITY_PERIOD, TOKEN_ID FROM " + accessTokenStoreTable + " WHERE CONSUMER_KEY = " +
+                    "? AND REFRESH_TOKEN = ? ORDER BY TIME_CREATED DESC LIMIT 1) AS IDN_OAUTH2_ACCESS_TOKEN_SELECTED " +
+                              "JOIN IDN_OAUTH2_SCOPE_ASSOCIATION ON IDN_OAUTH2_ACCESS_TOKEN_SELECTED.TOKEN_ID = " +
+                              "IDN_OAUTH2_SCOPE_ASSOCIATION.TOKEN_ID";
 
             if (connection.getMetaData().getDriverName().contains("MySQL")
-                || connection.getMetaData().getDriverName().contains("H2")
-                || connection.getMetaData().getDatabaseProductName().contains("DB2")) {
+                    || connection.getMetaData().getDriverName().contains("H2")) {
                 sql = mySqlQuery;
             } else if (connection.getMetaData().getDriverName().contains("MS SQL")) {
                 sql = msSqlQuery;
@@ -643,8 +661,6 @@ public class TokenMgtDAO {
                 sql = msSqlQuery;
             } else if (connection.getMetaData().getDriverName().contains("PostgreSQL")) {
                 sql = postgreSqlQuery;
-            } else if (connection.getMetaData().getDriverName().contains("INFORMIX")) {
-                sql = informixQuery;
             } else {
                 sql = oracleQuery;
             }
@@ -679,9 +695,8 @@ public class TokenMgtDAO {
                 }
                 iterateId++;
             }
-            if (scopes.size() > 0 && validationDataDO != null){
-                validationDataDO.setScope((String[])ArrayUtils.addAll(validationDataDO.getScope(),  
-                    scopes.toArray(new String[scopes.size()])));
+            if (scopes.size() > 0){
+                validationDataDO.setScope((String[])ArrayUtils.addAll(validationDataDO.getScope(), scopes.toArray()));
             }
             connection.commit();
         } catch (IdentityException e) {
@@ -724,7 +739,7 @@ public class TokenMgtDAO {
             if (userStoreDomain != null) {
                 accessTokenStoreTable = accessTokenStoreTable + "_" + userStoreDomain;
             }
-            sql = SQLQueries.DELETE_ACCESS_TOKEN.replaceAll("\\$accessTokenStoreTable", accessTokenStoreTable);
+            sql = "DELETE FROM " + accessTokenStoreTable + " WHERE ACCESS_TOKEN = ? ";
             prepStmt = connection.prepareStatement(sql);
 
             prepStmt.setString(1, persistenceProcessor.getProcessedAccessTokenIdentifier(accessToken));
@@ -799,9 +814,8 @@ public class TokenMgtDAO {
                 }
                 iterateId++;
             }
-            if (scopes.size() > 0 && dataDO != null){
-                dataDO.setScope((String[])ArrayUtils.addAll(dataDO.getScope(), 
-                     scopes.toArray(new String[scopes.size()])));
+            if (scopes.size() > 0){
+                dataDO.setScope((String[])ArrayUtils.add(dataDO.getScope(), scopes.toArray()));
             }
             connection.commit();
         } catch (IdentityException e) {
@@ -987,7 +1001,10 @@ public class TokenMgtDAO {
 
         try {
             connection = JDBCPersistenceManager.getInstance().getDBConnection();
-            String sql = SQLQueries.RETRIEVE_IOS_SCOPE_KEY;
+            String sql = "SELECT IOS.SCOPE_KEY " +
+                    "FROM IDN_OAUTH2_SCOPE IOS, IDN_OAUTH2_RESOURCE_SCOPE IORS " +
+                    "WHERE RESOURCE_PATH = ? " +
+                    "AND IORS.SCOPE_ID = IOS.SCOPE_ID";
 
             ps = connection.prepareStatement(sql);
             ps.setString(1, resourceUri);
@@ -1085,7 +1102,9 @@ public class TokenMgtDAO {
             connection = JDBCPersistenceManager.getInstance().getDBConnection();
             connection.setAutoCommit(false);
 
-            String sql = SQLQueries.DELETE_IDN_OPENID_USER_RPS;
+            String sql = "DELETE FROM IDN_OPENID_USER_RPS " +
+                         "WHERE USER_NAME = ? " +
+                         "AND RP_URL = ?";
 
             ps = connection.prepareStatement(sql);
             ps.setString(1, username);
